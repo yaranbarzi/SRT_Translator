@@ -249,7 +249,16 @@ ${jsonPayload}`;
         });
         break; // Key succeeded!
       } catch (primaryErr: any) {
-        console.warn(`Key #${kIdx + 1} with primary model ${primaryModel} failed (${primaryErr.message}). Attempting fallback model ${fallbackModel}...`);
+        const isQuotaErr = primaryErr.message?.includes("429") || primaryErr.message?.includes("RESOURCE_EXHAUSTED");
+        console.warn(`Key #${kIdx + 1} with primary model ${primaryModel} failed (${primaryErr.message}).`);
+
+        // If Key #1 hit 429 Rate Limit and Backup Key exists, immediately switch to Backup Key
+        if (isQuotaErr && kIdx < availableKeys.length - 1) {
+          console.log(`[Auto Failover] Key #${kIdx + 1} hit 429 Rate Limit. Instantly switching to Backup API Key #${kIdx + 2}...`);
+          lastError = primaryErr;
+          continue;
+        }
+
         try {
           response = await ai.models.generateContent({
             model: fallbackModel,
