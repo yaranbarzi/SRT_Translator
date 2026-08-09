@@ -917,8 +917,8 @@ export default function App() {
 
     const isProMode = mainTab === "advanced";
     const useParallel = isProMode ? isParallelEnabled : false;
-    const batchSize = useParallel ? 30 : 50;
-    const CONCURRENCY = useParallel ? 3 : 1;
+    const batchSize = useParallel ? 40 : 50;
+    const CONCURRENCY = useParallel ? 2 : 1;
     const glossaryToUse = isProMode ? glossary : [];
     const useTmCacheInEngine = isProMode ? useTmCache : false;
 
@@ -988,7 +988,7 @@ export default function App() {
 
         // Pacing delay to stay comfortably under Gemini's 15 RPM limit
         if (isParallelEnabled) {
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          await new Promise(resolve => setTimeout(resolve, 3800));
         }
 
         let success = false;
