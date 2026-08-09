@@ -539,7 +539,8 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: targetKey }),
       });
-      if (res.ok) {
+      const contentType = res.headers.get("content-type") || "";
+      if (res.ok && contentType.includes("application/json")) {
         const data = await res.json();
         if (data.valid) {
           setApiKeyStatus("valid");
@@ -550,37 +551,35 @@ export default function App() {
           setApiKeyError(data.error || (isRtl ? "کلید API نامعتبر یا غیرفعال است." : "API Key is invalid or inactive."));
           return;
         }
-      } else if (res.status === 404) {
-        throw new Error("STATIC_HOST_FALLBACK");
       } else {
-        const data = await res.json().catch(() => ({}));
-        setApiKeyStatus("invalid");
-        setApiKeyError(data.error || (isRtl ? "کلید API نامعتبر است." : "API key is invalid."));
-        return;
+        throw new Error("STATIC_HOST_FALLBACK");
       }
     } catch {
       // Direct client test for static hosts (Cloudflare Pages / GitHub Pages)
       try {
-        const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${targetKey}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: "ping" }] }],
-            generationConfig: { maxOutputTokens: 1 }
-          })
-        });
+        const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${targetKey}`);
         if (directRes.ok) {
           setApiKeyStatus("valid");
           setApiKeyError("");
         } else {
           const errData = await directRes.json().catch(() => ({}));
-          const errMsg = errData?.error?.message || (isRtl ? "کلید API نامعتبر است." : "Invalid API key.");
+          const rawMsg = errData?.error?.message || "";
+          let errMsg = rawMsg;
+          if (!errMsg) {
+            if (directRes.status === 400) errMsg = isRtl ? "فرمت کلید API نامعتبر است." : "API key format is invalid.";
+            else if (directRes.status === 403) errMsg = isRtl ? "دسترسی مسدود شد (403). کلید را بررسی کنید یا VPN را روشن کنید." : "Access forbidden (403). Check key or VPN.";
+            else errMsg = isRtl ? "کلید API نامعتبر یا غیرفعال است." : "API Key is invalid or inactive.";
+          }
           setApiKeyStatus("invalid");
           setApiKeyError(errMsg);
         }
       } catch (directErr: any) {
         setApiKeyStatus("invalid");
-        setApiKeyError(directErr.message || (isRtl ? "خطا در بررسی کلید API." : "API Key validation error."));
+        const isNetworkErr = directErr?.message?.includes("Failed to fetch") || directErr?.name === "TypeError";
+        const customErr = isNetworkErr
+          ? (isRtl ? "خطا در برقراری ارتباط با گوگل (Failed to fetch). اگر از ایران متصل هستید، حتماً VPN/قندشکن خود را روشن کنید." : "Network error (Failed to fetch). Please check your connection or VPN.")
+          : (directErr.message || (isRtl ? "خطا در بررسی کلید API." : "API Key validation error."));
+        setApiKeyError(customErr);
       }
     }
   };
@@ -1000,46 +999,26 @@ export default function App() {
                 }),
               });
 
+              const contentType = response.headers.get("content-type") || "";
               const responseText = await response.text();
+              const trimmedText = responseText.trim();
 
-              if (!response.ok) {
-                let errorMsg = `HTTP Error! Status: ${response.status}`;
-                const trimmed = responseText.trim();
-                if (trimmed.startsWith("<") || response.status === 404) {
-                  // Static host (GitHub Pages / Cloudflare Pages) where backend /api doesn't exist
-                  throw new Error("STATIC_HOST_FALLBACK");
-                } else {
-                  try {
-                    const errBody = JSON.parse(trimmed);
-                    errorMsg = errBody.error || errorMsg;
-                  } catch (e) {
-                    errorMsg = `Server Error (${response.status}): ${trimmed.slice(0, 150)}`;
-                  }
-                }
-
-                if (
-                  response.status === 429 ||
-                  errorMsg.toLowerCase().includes("quota") ||
-                  errorMsg.toLowerCase().includes("rate limit") ||
-                  errorMsg.toLowerCase().includes("resource_exhausted") ||
-                  errorMsg.toLowerCase().includes("503")
-                ) {
-                  isPausedRef.current = true;
-                  triggerRateLimitMode(errorMsg, successfulBatchesRef.current);
-                  return;
-                }
-                throw new Error(errorMsg);
+              if (!response.ok || contentType.includes("text/html") || trimmedText.startsWith("<")) {
+                throw new Error("STATIC_HOST_FALLBACK");
               }
 
-              const trimmedText = responseText.trim();
               if (!trimmedText.startsWith("{") && !trimmedText.startsWith("[")) {
-                throw new Error(isRtl ? "پاسخ مدل به فرمت JSON نیست." : "Response is not valid JSON.");
+                throw new Error("STATIC_HOST_FALLBACK");
               }
 
               const data = JSON.parse(trimmedText);
               apiTranslations = data.translations || {};
             } catch (backendErr: any) {
-              if (backendErr.message === "STATIC_HOST_FALLBACK" || backendErr.message?.includes("Failed to fetch")) {
+              if (
+                backendErr.message === "STATIC_HOST_FALLBACK" ||
+                backendErr.message?.includes("Failed to fetch") ||
+                backendErr.message?.includes("JSON")
+              ) {
                 // Direct client Gemini API call for static site (Cloudflare Pages / GitHub Pages)
                 const effectiveKey = userApiKey.trim() || import.meta.env.VITE_GEMINI_API_KEY || "";
                 if (!effectiveKey) {
