@@ -599,6 +599,11 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("sub_translator_theme", theme);
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
   }, [theme]);
 
   // Translation Memory
@@ -935,8 +940,25 @@ export default function App() {
     }
 
     const pendingBatches: number[] = [];
-    for (let b = startBatch; b < totalBatches; b++) {
-      pendingBatches.push(b);
+    for (let b = 0; b < totalBatches; b++) {
+      const startIdx = b * batchSize;
+      const endIdx = Math.min(startIdx + batchSize, subsToProcess.length);
+      const batchSubtitles = subsToProcess.slice(startIdx, endIdx);
+
+      const needsTranslation = batchSubtitles.some(s => {
+        if (s.translatedText !== undefined && s.translatedText !== null && String(s.translatedText).trim() !== "") {
+          return false;
+        }
+        if (isProMode && useTmCacheInEngine) {
+          const tmKey = getTmKey(s.text, sourceLanguage, targetLanguage);
+          if (updatedTmCache[tmKey]) return false;
+        }
+        return true;
+      });
+
+      if (needsTranslation) {
+        pendingBatches.push(b);
+      }
     }
 
     const runWorker = async (workerId: number) => {
@@ -1715,31 +1737,47 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
               subtitles.map((sub) => (
                 <div 
                   key={`sub-${sub.id}`}
-                  className={`p-3 rounded-xl border transition-all text-xs space-y-1.5 ${
+                  className={`p-3.5 rounded-xl border transition-all text-xs space-y-2 ${
                     sub.translatedText
                       ? theme === "light"
-                        ? "bg-white border-amber-300 shadow-2xs text-slate-950"
+                        ? "bg-white border-amber-300/80 shadow-xs text-slate-950"
                         : "bg-[#121214] border-white/10 text-white"
                       : theme === "light"
                         ? "bg-slate-100 border-slate-300 text-slate-800"
                         : "bg-[#121214]/50 border-white/5 opacity-60 text-gray-300"
                   }`}
                 >
-                  <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-800 dark:text-gray-400">
+                  <div className={`flex items-center justify-between text-[11px] font-mono font-bold ${
+                    theme === "light" ? "text-slate-800" : "text-gray-400"
+                  }`}>
                     <span>#{sub.id}</span>
                     <span>{sub.timeframe}</span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
-                    <div className="space-y-0.5">
-                      <span className="text-[10px] uppercase font-extrabold text-slate-600 dark:text-gray-400 block">{t.previewSource}</span>
-                      <p className="text-slate-900 dark:text-gray-200 font-sans font-medium leading-relaxed dir-ltr">{sub.text}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                    <div className="space-y-1">
+                      <span className={`text-[10px] uppercase font-extrabold block ${
+                        theme === "light" ? "text-slate-600" : "text-gray-400"
+                      }`}>{t.previewSource}</span>
+                      <p className={`font-sans font-medium leading-relaxed dir-ltr ${
+                        theme === "light" ? "text-slate-900" : "text-gray-200"
+                      }`}>{sub.text}</p>
                     </div>
 
-                    <div className="space-y-0.5 border-t md:border-t-0 md:border-r dark:border-white/10 border-slate-300 pt-1 md:pt-0 md:pr-2">
-                      <span className="text-[10px] uppercase font-extrabold text-orange-600 dark:text-[#00adb5] block">{t.previewTarget}</span>
+                    <div className={`space-y-1 border-t md:border-t-0 md:border-r pt-1 md:pt-0 md:pr-3 ${
+                      theme === "light" ? "border-slate-200" : "border-white/10"
+                    }`}>
+                      <span className={`text-[10px] uppercase font-extrabold block ${
+                        theme === "light" ? "text-orange-600" : "text-[#00adb5]"
+                      }`}>{t.previewTarget}</span>
                       <p className={`font-sans leading-relaxed ${isTargetLanguageRtl ? "dir-rtl" : "dir-ltr"} ${
-                        sub.translatedText ? "text-black dark:text-white font-bold text-sm" : "text-slate-500 italic"
+                        sub.translatedText
+                          ? theme === "light"
+                            ? "text-slate-950 font-bold text-sm"
+                            : "text-white font-bold text-sm"
+                          : theme === "light"
+                            ? "text-slate-500 italic"
+                            : "text-gray-500 italic"
                       }`}>
                         {sub.translatedText || (status === "translating" ? "..." : "-")}
                       </p>
