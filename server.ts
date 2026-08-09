@@ -121,11 +121,22 @@ app.post("/api/translate", async (req, res) => {
     const availableKeys: string[] = [];
     if (apiKey && typeof apiKey === "string" && apiKey.trim()) {
       availableKeys.push(apiKey.trim());
-    } else {
-      if (process.env.GEMINI_API_KEY) availableKeys.push(process.env.GEMINI_API_KEY.trim());
-      if (process.env.GEMINI_API_KEY_BACKUP) availableKeys.push(process.env.GEMINI_API_KEY_BACKUP.trim());
-      if (process.env.GEMINI_API_KEY_SECONDARY) availableKeys.push(process.env.GEMINI_API_KEY_SECONDARY.trim());
-      if (process.env.GEMINI_API_KEY_2) availableKeys.push(process.env.GEMINI_API_KEY_2.trim());
+    }
+
+    const envKeyList = [
+      process.env.GEMINI_API_KEY,
+      process.env.GEMINI_API_KEY_BACKUP,
+      process.env.GEMINI_API_KEY_SECONDARY,
+      process.env.GEMINI_API_KEY_2
+    ];
+
+    for (const ek of envKeyList) {
+      if (ek && typeof ek === "string" && ek.trim()) {
+        const trimmedEnvKey = ek.trim();
+        if (!availableKeys.includes(trimmedEnvKey)) {
+          availableKeys.push(trimmedEnvKey);
+        }
+      }
     }
 
     if (availableKeys.length === 0) {
