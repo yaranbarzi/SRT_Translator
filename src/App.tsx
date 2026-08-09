@@ -645,18 +645,11 @@ export default function App() {
   }, [countdownSeconds, isRateLimited]);
 
   const triggerRateLimitMode = (errorMsg: string, completedBatchesCount: number) => {
-    if (completedBatchesCount > 0) {
-      setIsRateLimited(true);
-      setCountdownSeconds(60);
-      setStatus("paused");
-      setErrorMessage(errorMsg);
-      addLog(isRtl ? `محدودیت نرخ رخ داد. شروع ۶۰ ثانیه تنفس...` : `Rate limit reached. 60s cool-down timer started...`, "ERROR");
-    } else {
-      setIsRateLimited(false);
-      setStatus("error");
-      setErrorMessage(errorMsg);
-      addLog(`API Error: ${errorMsg}`, "ERROR");
-    }
+    setIsRateLimited(true);
+    setCountdownSeconds(60);
+    setStatus("paused");
+    setErrorMessage(errorMsg);
+    addLog(isRtl ? `محدودیت نرخ (Rate Limit 429) رخ داد. شروع ۶۰ ثانیه استراحت هوشمند برای بازگردانی سهمیه API...` : `Rate limit reached (429). 60s cool-down timer started...`, "ERROR");
   };
 
   const addLog = (
@@ -1053,8 +1046,8 @@ export default function App() {
 
                 let glossaryText = "";
                 if (glossaryToUse && glossaryToUse.length > 0) {
-                  const entries = glossaryToUse.map(e => `  "${e.source}" MUST become "${e.target}"`).join("\n");
-                  glossaryText = `\n\nCRITICAL GLOSSARY RULES - OBEY EXACTLY:\n${entries}\n\nIf a glossary term appears in the source, use EXACTLY the target above. Do NOT translate it differently.`;
+                  const entries = glossaryToUse.map(e => `  - "${e.source}" MUST BE TRANSLATED EXACTLY AS "${e.target}"`).join("\n");
+                  glossaryText = `\n\nCRITICAL MANDATORY GLOSSARY DICTIONARY (ABSOLUTE PRIORITY OVERRIDE):\nYou MUST replace the following terms/names in the target translation with their exact mapped translations below:\n${entries}\n\nRULES FOR GLOSSARY:\n1. Whenever any term or proper name listed above appears in the source, you MUST output its exact target translation.\n2. Do NOT keep original English characters for any word listed in this glossary.\n3. The glossary overrides all general proper-name untranslated rules.`;
                 }
 
                 let styleRules = "";
@@ -1164,12 +1157,14 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
               errText.toLowerCase().includes("resource_exhausted")
             ) {
               isPausedRef.current = true;
+              pendingBatches.unshift(b);
               triggerRateLimitMode(errText, successfulBatchesRef.current);
               return;
             }
 
             if (attempts >= maxAttempts) {
               isPausedRef.current = true;
+              pendingBatches.unshift(b);
               triggerRateLimitMode(`Batch ${b + 1} failed after ${maxAttempts} attempts (${assignedModel}): ${err.message}`, successfulBatchesRef.current);
               return;
             }
@@ -1190,17 +1185,17 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
     await Promise.all(activeWorkers);
 
     if (!isPausedRef.current) {
-      // Ensure 100% of subtitles have non-undefined translatedText upon completion
-      localSubs = localSubs.map(sub => ({
-        ...sub,
-        translatedText: sub.translatedText !== undefined ? sub.translatedText : sub.text
-      }));
-      setSubtitles([...localSubs]);
-      localStorage.setItem("sub_translator_subs", JSON.stringify(localSubs));
-
-      setStatus("completed");
-      setCurrentBatchIndex(totalBatches);
-      addLog(isRtl ? `ترجمه کامل شد! تمام ${subsToProcess.length} زیرنویس با موفقیت (۱۰۰٪) ترجمه شدند.` : `Translation complete! All ${subsToProcess.length} subtitles translated (100%).`, "SUCCESS");
+      const untranslatedLines = localSubs.filter(sub => sub.translatedText === undefined || sub.translatedText === null || String(sub.translatedText).trim() === "");
+      if (untranslatedLines.length > 0) {
+        addLog(isRtl ? `تعداد ${untranslatedLines.length} خط زیرنویس هنوز ترجمه نشده باقی مانده است. می‌توانید دکمه "ادامه ترجمه" را بزنید.` : `${untranslatedLines.length} subtitle lines remain untranslated. Click Resume to complete.`, "ERROR");
+        setStatus("paused");
+      } else {
+        setSubtitles([...localSubs]);
+        localStorage.setItem("sub_translator_subs", JSON.stringify(localSubs));
+        setStatus("completed");
+        setCurrentBatchIndex(totalBatches);
+        addLog(isRtl ? `ترجمه کامل شد! تمام ${subsToProcess.length} زیرنویس با موفقیت (۱۰۰٪) ترجمه شدند.` : `Translation complete! All ${subsToProcess.length} subtitles translated (100%).`, "SUCCESS");
+      }
     }
   };
 
@@ -1565,30 +1560,87 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
     </div>
   );
 
+  const renderRateLimitBanner = () => {
+    if (!isRateLimited && countdownSeconds === 0 && !errorMessage) return null;
+
+    return (
+      <div className={`p-4 rounded-2xl border transition-all ${
+        theme === "light"
+          ? "bg-amber-100/90 border-amber-300 text-amber-950 shadow-md"
+          : "bg-gradient-to-r from-amber-950/80 to-orange-950/80 border-amber-500/50 text-amber-100 shadow-lg shadow-amber-500/10"
+      }`}>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 flex-shrink-0">
+              <Clock className="w-5 h-5 animate-spin" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm flex items-center gap-2">
+                <span>{isRtl ? "استراحت هوشمند ۶۰ ثانیه‌ای (Rate Limit 429)" : "Smart 60s Cool-Down Active (Rate Limit 429)"}</span>
+                {countdownSeconds > 0 && (
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500 text-black font-mono font-extrabold animate-pulse">
+                    {countdownSeconds}s
+                  </span>
+                )}
+              </h4>
+              <p className="text-xs opacity-85 mt-0.5 leading-relaxed">
+                {countdownSeconds > 0
+                  ? (isRtl ? `به دلیل محدودیت تعداد درخواست گوگل (429)، سیستم به مدت ${countdownSeconds} ثانیه در حال استراحت است تا سهمیه بازگردد.` : `Due to Gemini rate limits (429), the system is cooling down for ${countdownSeconds}s to restore quota.`)
+                  : (isRtl ? "استراحت به پایان رسید! می‌توانید با زدن دکمه «ادامه ترجمه» فرایند را ادامه دهید." : "Cool-down completed! Click 'Resume' to continue translation.")
+                }
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleResume}
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-600 text-white shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 flex-shrink-0"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>{isRtl ? "ادامه ترجمه" : "Resume Now"}</span>
+          </button>
+        </div>
+
+        {/* Live Countdown Bar */}
+        {countdownSeconds > 0 && (
+          <div className="w-full bg-amber-900/20 dark:bg-black/30 h-2 rounded-full overflow-hidden mt-3 border border-amber-500/20">
+            <div
+              className="bg-amber-500 h-full transition-all duration-1000"
+              style={{ width: `${(countdownSeconds / 60) * 100}%` }}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderProgressAndStats = () => {
     if (subtitles.length === 0) return null;
 
     const translatedCount = status === "completed"
       ? subtitles.length
-      : subtitles.filter(s => s.translatedText !== undefined).length;
+      : subtitles.filter(s => s.translatedText !== undefined && s.translatedText !== null && String(s.translatedText).trim() !== "").length;
 
     const progressPercent = subtitles.length > 0
       ? (status === "completed" ? 100 : Math.round((translatedCount / subtitles.length) * 100))
       : 0;
 
     return (
-      <div className={`p-4 sm:p-5 rounded-2xl border space-y-3 ${
-        theme === "light" ? "bg-white border-amber-200 shadow-xs" : "bg-[#1e1e24] border-white/10"
-      }`}>
-        <div className="flex items-center justify-between text-xs font-bold">
-          <span className="flex items-center gap-1.5">
-            <Clock className="w-4 h-4 text-orange-500" />
-            {t.statsTitle}
-          </span>
-          <span className="text-orange-600 dark:text-[#00adb5] font-mono">
-            {progressPercent}%
-          </span>
-        </div>
+      <div className="space-y-3">
+        {renderRateLimitBanner()}
+
+        <div className={`p-4 sm:p-5 rounded-2xl border space-y-3 ${
+          theme === "light" ? "bg-white border-amber-200 shadow-xs" : "bg-[#1e1e24] border-white/10"
+        }`}>
+          <div className="flex items-center justify-between text-xs font-bold">
+            <span className="flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-orange-500" />
+              {t.statsTitle}
+            </span>
+            <span className="text-orange-600 dark:text-[#00adb5] font-mono">
+              {progressPercent}%
+            </span>
+          </div>
 
         {/* Progress Bar */}
         <div className="w-full bg-slate-200 dark:bg-white/10 h-2.5 rounded-full overflow-hidden">
@@ -1619,8 +1671,9 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
           </div>
         </div>
       </div>
-    );
-  };
+    </div>
+  );
+};
 
   const renderWorkspaceLogsAndPreview = () => (
     <div className={`flex-1 rounded-2xl border flex flex-col min-h-[350px] overflow-hidden ${
