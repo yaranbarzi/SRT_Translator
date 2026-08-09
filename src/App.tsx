@@ -986,6 +986,11 @@ export default function App() {
 
         addLog(isRtl ? `ارسال دسته ${b + 1}/${totalBatches} (خطوط ${startIdx + 1} تا ${endIdx}) با مدل [${assignedModel}]...` : `Sending batch ${b + 1}/${totalBatches} (lines ${startIdx + 1}-${endIdx}) using model [${assignedModel}]...`, "WAIT");
 
+        // Pacing delay to stay comfortably under Gemini's 15 RPM limit
+        if (isParallelEnabled) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+
         let success = false;
         let attempts = 0;
         const maxAttempts = 3;
@@ -1569,36 +1574,26 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
           ? "bg-amber-100/90 border-amber-300 text-amber-950 shadow-md"
           : "bg-gradient-to-r from-amber-950/80 to-orange-950/80 border-amber-500/50 text-amber-100 shadow-lg shadow-amber-500/10"
       }`}>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 flex-shrink-0">
-              <Clock className="w-5 h-5 animate-spin" />
-            </div>
-            <div>
-              <h4 className="font-bold text-sm flex items-center gap-2">
-                <span>{isRtl ? "استراحت هوشمند ۶۰ ثانیه‌ای (Rate Limit 429)" : "Smart 60s Cool-Down Active (Rate Limit 429)"}</span>
-                {countdownSeconds > 0 && (
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500 text-black font-mono font-extrabold animate-pulse">
-                    {countdownSeconds}s
-                  </span>
-                )}
-              </h4>
-              <p className="text-xs opacity-85 mt-0.5 leading-relaxed">
-                {countdownSeconds > 0
-                  ? (isRtl ? `به دلیل محدودیت تعداد درخواست گوگل (429)، سیستم به مدت ${countdownSeconds} ثانیه در حال استراحت است تا سهمیه بازگردد.` : `Due to Gemini rate limits (429), the system is cooling down for ${countdownSeconds}s to restore quota.`)
-                  : (isRtl ? "استراحت به پایان رسید! می‌توانید با زدن دکمه «ادامه ترجمه» فرایند را ادامه دهید." : "Cool-down completed! Click 'Resume' to continue translation.")
-                }
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 flex-shrink-0">
+            <Clock className="w-5 h-5 animate-spin" />
           </div>
-
-          <button
-            onClick={handleResume}
-            className="w-full sm:w-auto px-4 py-2.5 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-600 text-white shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 flex-shrink-0"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{isRtl ? "ادامه ترجمه" : "Resume Now"}</span>
-          </button>
+          <div>
+            <h4 className="font-bold text-sm flex items-center gap-2">
+              <span>{isRtl ? "استراحت هوشمند ۶۰ ثانیه‌ای (Rate Limit 429)" : "Smart 60s Cool-Down Active (Rate Limit 429)"}</span>
+              {countdownSeconds > 0 && (
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500 text-black font-mono font-extrabold animate-pulse">
+                  {countdownSeconds}s
+                </span>
+              )}
+            </h4>
+            <p className="text-xs opacity-85 mt-0.5 leading-relaxed">
+              {countdownSeconds > 0
+                ? (isRtl ? `به دلیل محدودیت تعداد درخواست گوگل (429)، سیستم به مدت ${countdownSeconds} ثانیه در حال استراحت است تا سهمیه بازگردد.` : `Due to Gemini rate limits (429), the system is cooling down for ${countdownSeconds}s to restore quota.`)
+                : (isRtl ? "استراحت به پایان رسید! می‌توانید با زدن دکمه «ادامه ترجمه» در پایین، فرایند را ادامه دهید." : "Cool-down completed! Click 'Resume' below to continue translation.")
+              }
+            </p>
+          </div>
         </div>
 
         {/* Live Countdown Bar */}
