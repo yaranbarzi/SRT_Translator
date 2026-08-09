@@ -1064,7 +1064,8 @@ Target Language: ${targetLanguage}
 Translation Style Selected: ${translationStyle || "Conversational/Casual"}${styleRules}${glossaryText}${rtlInstruction}
 Return ONLY valid JSON object with the exact same keys as input. No markdown formatting outside JSON.`;
 
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${effectiveKey}`;
+                const modelToUse = assignedModel || "gemini-3.5-flash-lite";
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${effectiveKey}`;
                 const res = await fetch(url, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
