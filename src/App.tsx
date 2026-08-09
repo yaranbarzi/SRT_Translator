@@ -969,7 +969,7 @@ export default function App() {
           continue;
         }
 
-        addLog(isRtl ? `ارسال دسته ${b + 1}/${totalBatches} (خطوط ${startIdx + 1} تا ${endIdx})...` : `Sending batch ${b + 1}/${totalBatches} (lines ${startIdx + 1}-${endIdx})...`, "WAIT");
+        addLog(isRtl ? `ارسال دسته ${b + 1}/${totalBatches} (خطوط ${startIdx + 1} تا ${endIdx}) با مدل [${assignedModel}]...` : `Sending batch ${b + 1}/${totalBatches} (lines ${startIdx + 1}-${endIdx}) using model [${assignedModel}]...`, "WAIT");
 
         let success = false;
         let attempts = 0;
@@ -1092,16 +1092,22 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
               }
             }
 
-            // Ensure every item sent in toTranslateList gets a translation (fallback to original text if missing)
+            // Strictly validate that model responded with non-empty translations for all items in batch
+            let missingCount = 0;
             toTranslateList.forEach(s => {
               const k = String(s.id);
-              if (apiTranslations[k] === undefined || apiTranslations[k] === null) {
-                apiTranslations[k] = s.text;
+              const val = apiTranslations[k] !== undefined ? apiTranslations[k] : apiTranslations[s.id];
+              if (val === undefined || val === null || String(val).trim() === "") {
+                missingCount++;
               }
             });
 
+            if (missingCount > 0) {
+              throw new Error(isRtl ? `مدل ${assignedModel} برای ${missingCount} خط از زیرنویس‌ها پاسخ ارائه نداد. تلاش مجدد...` : `Model ${assignedModel} missed ${missingCount} lines in this batch. Retrying...`);
+            }
+
             localSubs = localSubs.map(sub => {
-              const matchedVal = apiTranslations[String(sub.id)];
+              const matchedVal = apiTranslations[String(sub.id)] !== undefined ? apiTranslations[String(sub.id)] : apiTranslations[sub.id];
               if (matchedVal !== undefined) {
                 if (isProMode && useTmCacheInEngine) {
                   const tmKey = getTmKey(sub.text, sourceLanguage, targetLanguage);
@@ -1121,7 +1127,7 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
               localStorage.setItem("sub_translator_tm", JSON.stringify(updatedTmCache));
             }
 
-            addLog(isRtl ? `دسته ${b + 1}/${totalBatches} با موفقیت ترجمه شد.` : `Batch ${b + 1}/${totalBatches} translated successfully.`, "SUCCESS");
+            addLog(isRtl ? `دسته ${b + 1}/${totalBatches} (مدل ${assignedModel}) با موفقیت ترجمه شد.` : `Batch ${b + 1}/${totalBatches} (model ${assignedModel}) translated successfully.`, "SUCCESS");
 
             localStorage.setItem("sub_translator_subs", JSON.stringify(localSubs));
             localStorage.setItem("sub_translator_batch", String(b + 1));
@@ -1142,12 +1148,12 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
 
             if (attempts >= maxAttempts) {
               isPausedRef.current = true;
-              triggerRateLimitMode(`Batch ${b + 1} failed after ${maxAttempts} attempts: ${err.message}`, successfulBatchesRef.current);
+              triggerRateLimitMode(`Batch ${b + 1} failed after ${maxAttempts} attempts (${assignedModel}): ${err.message}`, successfulBatchesRef.current);
               return;
             }
 
             const backoffSeconds = Math.pow(2, attempts);
-            addLog(isRtl ? `تلاش مجدد دسته ${b + 1} در ${backoffSeconds} ثانیه...` : `Retrying batch ${b + 1} in ${backoffSeconds}s...`, "ERROR");
+            addLog(isRtl ? `تلاش مجدد دسته ${b + 1} (مدل ${assignedModel}) در ${backoffSeconds} ثانیه... (علت: ${err.message})` : `Retrying batch ${b + 1} (model ${assignedModel}) in ${backoffSeconds}s... (Error: ${err.message})`, "ERROR");
             await new Promise(r => setTimeout(r, backoffSeconds * 1000));
           }
         }
@@ -1712,28 +1718,28 @@ Return ONLY valid JSON object with the exact same keys as input. No markdown for
                   className={`p-3 rounded-xl border transition-all text-xs space-y-1.5 ${
                     sub.translatedText
                       ? theme === "light"
-                        ? "bg-amber-50/30 border-amber-200"
-                        : "bg-[#121214] border-white/10"
+                        ? "bg-white border-amber-300 shadow-2xs text-slate-950"
+                        : "bg-[#121214] border-white/10 text-white"
                       : theme === "light"
-                        ? "bg-slate-50 border-slate-200 opacity-70"
-                        : "bg-[#121214]/50 border-white/5 opacity-60"
+                        ? "bg-slate-100 border-slate-300 text-slate-800"
+                        : "bg-[#121214]/50 border-white/5 opacity-60 text-gray-300"
                   }`}
                 >
-                  <div className="flex items-center justify-between text-[10px] opacity-60 font-mono">
+                  <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-800 dark:text-gray-400">
                     <span>#{sub.id}</span>
                     <span>{sub.timeframe}</span>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
                     <div className="space-y-0.5">
-                      <span className="text-[9px] uppercase font-bold text-gray-400 block">{t.previewSource}</span>
-                      <p className="text-gray-700 dark:text-gray-300 font-sans leading-relaxed dir-ltr">{sub.text}</p>
+                      <span className="text-[10px] uppercase font-extrabold text-slate-600 dark:text-gray-400 block">{t.previewSource}</span>
+                      <p className="text-slate-900 dark:text-gray-200 font-sans font-medium leading-relaxed dir-ltr">{sub.text}</p>
                     </div>
 
-                    <div className="space-y-0.5 border-t md:border-t-0 md:border-r dark:border-white/10 border-slate-200 pt-1 md:pt-0 md:pr-2">
-                      <span className="text-[9px] uppercase font-bold text-orange-600 dark:text-[#00adb5] block">{t.previewTarget}</span>
+                    <div className="space-y-0.5 border-t md:border-t-0 md:border-r dark:border-white/10 border-slate-300 pt-1 md:pt-0 md:pr-2">
+                      <span className="text-[10px] uppercase font-extrabold text-orange-600 dark:text-[#00adb5] block">{t.previewTarget}</span>
                       <p className={`font-sans leading-relaxed ${isTargetLanguageRtl ? "dir-rtl" : "dir-ltr"} ${
-                        sub.translatedText ? "text-slate-900 dark:text-white font-medium" : "text-gray-400 italic"
+                        sub.translatedText ? "text-black dark:text-white font-bold text-sm" : "text-slate-500 italic"
                       }`}>
                         {sub.translatedText || (status === "translating" ? "..." : "-")}
                       </p>
