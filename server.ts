@@ -118,7 +118,19 @@ app.post("/api/translate", async (req, res) => {
       return res.json({ translations: {} });
     }
 
-    const ai = getAiClient(apiKey);
+    const availableKeys: string[] = [];
+    if (apiKey && typeof apiKey === "string" && apiKey.trim()) {
+      availableKeys.push(apiKey.trim());
+    } else {
+      if (process.env.GEMINI_API_KEY) availableKeys.push(process.env.GEMINI_API_KEY.trim());
+      if (process.env.GEMINI_API_KEY_BACKUP) availableKeys.push(process.env.GEMINI_API_KEY_BACKUP.trim());
+      if (process.env.GEMINI_API_KEY_SECONDARY) availableKeys.push(process.env.GEMINI_API_KEY_SECONDARY.trim());
+      if (process.env.GEMINI_API_KEY_2) availableKeys.push(process.env.GEMINI_API_KEY_2.trim());
+    }
+
+    if (availableKeys.length === 0) {
+      return res.status(400).json({ error: "Gemini API Key is missing. Please configure GEMINI_API_KEY or GEMINI_API_KEY_BACKUP in Cloudflare Secrets." });
+    }
 
     // Determine if target language is RTL (Persian, Arabic, Hebrew, or Urdu)
     const rtlLanguages = ["persian", "farsi", "arabic", "hebrew", "urdu", "fa", "ar", "he", "ur"];
@@ -133,8 +145,15 @@ app.post("/api/translate", async (req, res) => {
     const getSystemInstruction = (style: string, tgtLang: string, gloss: any[]) => {
       let glossaryText = "";
       if (gloss && gloss.length > 0) {
-        const entries = gloss.map(e => `  "${e.source}" MUST become "${e.target}"`).join("\n");
-        glossaryText = `\n\nCRITICAL GLOSSARY RULES - OBEY EXACTLY:\n${entries}\n\nIf a glossary term appears in the source, use EXACTLY the target above. Do NOT translate it differently.`;
+        const entries = gloss.map(e => `  - "${e.source}" MUST BE TRANSLATED EXACTLY AS "${e.target}"`).join("\n");
+        glossaryText = `\n\nCRITICAL MANDATORY GLOSSARY DICTIONARY (ABSOLUTE PRIORITY OVERRIDE):
+You MUST replace the following terms/names in the target translation with their exact mapped translations below:
+${entries}
+
+RULES FOR GLOSSARY:
+1. Whenever any term or proper name listed above appears in the source, you MUST output its exact target translation.
+2. Do NOT keep original English characters for any word listed in this glossary.
+3. The glossary overrides all general proper-name untranslated rules.`;
       }
 
       let styleRules = "";
@@ -194,40 +213,61 @@ Return ONLY valid JSON with same keys. No extra text.`;
     const contents = `JSON to translate:
 ${jsonPayload}`;
 
-    let response;
-    try {
-      response = await ai.models.generateContent({
-        model: primaryModel,
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.3,
-          responseMimeType: "application/json",
-          safetySettings: [
-            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-          ] as any
+    let response: any = null;
+    let lastError: any = null;
+
+    for (let kIdx = 0; kIdx < availableKeys.length; kIdx++) {
+      const currentKey = availableKeys[kIdx];
+      const ai = getAiClient(currentKey);
+
+      try {
+        response = await ai.models.generateContent({
+          model: primaryModel,
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.3,
+            responseMimeType: "application/json",
+            safetySettings: [
+              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+            ] as any
+          }
+        });
+        break; // Key succeeded!
+      } catch (primaryErr: any) {
+        console.warn(`Key #${kIdx + 1} with primary model ${primaryModel} failed (${primaryErr.message}). Attempting fallback model ${fallbackModel}...`);
+        try {
+          response = await ai.models.generateContent({
+            model: fallbackModel,
+            contents,
+            config: {
+              systemInstruction,
+              temperature: 0.3,
+              responseMimeType: "application/json",
+              safetySettings: [
+                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+              ] as any
+            }
+          });
+          break; // Fallback model succeeded!
+        } catch (fallbackErr: any) {
+          lastError = fallbackErr;
+          console.warn(`Key #${kIdx + 1} failed on fallback model as well (${fallbackErr.message}).`);
+          if (kIdx < availableKeys.length - 1) {
+            console.log(`[Auto Failover] Switching to backup API key #${kIdx + 2}...`);
+          }
         }
-      });
-    } catch (primaryErr: any) {
-      console.warn(`Primary model ${primaryModel} failed (${primaryErr.message}). Attempting failover to ${fallbackModel}...`);
-      response = await ai.models.generateContent({
-        model: fallbackModel,
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.3,
-          responseMimeType: "application/json",
-          safetySettings: [
-            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-          ] as any
-        }
-      });
+      }
+    }
+
+    if (!response) {
+      throw lastError || new Error("All available API keys failed to execute request.");
     }
 
     const responseText = response.text;
